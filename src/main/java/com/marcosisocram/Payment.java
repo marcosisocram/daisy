@@ -2,6 +2,7 @@ package com.marcosisocram;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 public class Payment implements Serializable {
@@ -11,13 +12,13 @@ public class Payment implements Serializable {
 
     private String correlationId;
     private Double amount;
-    private LocalDateTime requestedAt;
+    private Instant requestedAt;
 
     public Payment( ) {
-        this( "", 0d, LocalDateTime.now( ) );
+        this( "", 0d, Instant.now( ) );
     }
 
-    public Payment( String correlationId, Double amount, LocalDateTime requestedAt ) {
+    public Payment( String correlationId, Double amount, Instant requestedAt ) {
         this.correlationId = correlationId;
         this.amount = amount;
         this.requestedAt = requestedAt;
@@ -39,11 +40,11 @@ public class Payment implements Serializable {
         this.amount = amount;
     }
 
-    public LocalDateTime getRequestedAt( ) {
+    public Instant getRequestedAt( ) {
         return requestedAt;
     }
 
-    public void setRequestedAt( LocalDateTime requestedAt ) {
+    public void setRequestedAt( Instant requestedAt ) {
         this.requestedAt = requestedAt;
     }
 

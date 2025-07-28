@@ -26,7 +26,59 @@
             <artifactId>jackson-databind</artifactId>
             <version>2.19.1</version>
         </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>2.19.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.50.3.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>6.3.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.17</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>2.0.17</version>
+        </dependency>
     </dependencies>
+
+    <!-- se não tivesse o problema com sqlite, gerar executavel estatico  -->
+    <profiles>
+        <profile>
+            <id>static-musl</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <version>0.10.6</version>
+                        <configuration>
+                            <skip>false</skip>
+                            <imageName>app</imageName>
+                            <buildArgs>
+                                <buildArg>--enable-url-protocols=http</buildArg>
+                                <buildArg>-Dorg.sqlite.lib.exportPath=${project.build.directory}</buildArg>
+                                <buildArg>--static</buildArg>
+                                <buildArg>--libc=musl</buildArg>
+                                <mainClass>com.marcosisocram.Main</mainClass>
+                            </buildArgs>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
     <build>
         <plugins>
@@ -44,6 +96,7 @@
                     <imageName>app</imageName>
                     <buildArgs>
                         <buildArg>--enable-url-protocols=http</buildArg>
+                        <buildArg>-Dorg.sqlite.lib.exportPath=${project.build.directory}</buildArg>
                         <mainClass>com.marcosisocram.Main</mainClass>
                     </buildArgs>
                 </configuration>
