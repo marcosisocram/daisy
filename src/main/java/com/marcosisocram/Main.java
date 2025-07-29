@@ -43,6 +43,7 @@ public class Main {
     private static final String INSERT_INTO_DEFAULT_VALUES = "INSERT INTO payments (correlation_id, amount, requested_at, processed_at_default) VALUES ";
 
     private static StringBuffer INSERTS = new StringBuffer( INSERT_INTO_DEFAULT_VALUES );
+    private static final Object INSERTS_LOCK = new Object();
 
 
     public static synchronized DataSource getDataSource( ) {
@@ -108,8 +109,8 @@ public class Main {
             logger.atWarn( ).log( e.getMessage( ) );
         }
 
-//        int numberOfConsumers = ( Runtime.getRuntime( ).availableProcessors( ) / 2 ) + 1;
-        int numberOfConsumers = 10;
+
+        int numberOfConsumers = Math.max( 10 * Runtime.getRuntime( ).availableProcessors( ), 10 );
 
         for ( int i = 0; i < numberOfConsumers; i++ ) {
 
@@ -122,14 +123,12 @@ public class Main {
                     while ( true ) {
                         try {
                             final Payment takk = queue.take( );
-//                            logger.atInfo( ).log( "{}", takk.getCorrelationId( ) );
 
                             final String writeValueAsString = objectMapper.writeValueAsString( takk );
 
                             try {
                                 final HttpRequest request = HttpRequest.newBuilder( )
                                         .uri( URI.create( urlDefault ) )
-//                                        .timeout( Duration.ofMillis( 500 ) )
                                         .header( "Content-Type", "application/json" )
                                         .POST( HttpRequest.BodyPublishers.ofString( writeValueAsString ) )
                                         .build( );
@@ -142,7 +141,6 @@ public class Main {
                                     logger.atError( ).log( "default 422 - {} - {}", writeValueAsString, httpResponse.body( ) );
                                 } else {
                                     logger.atError( ).log( "default Não deu exception, mas retornou {} - {} - {}", httpResponse.statusCode( ), httpResponse.body( ), writeValueAsString );
-                                    //TODO gerar uma nova imagem e rodar novamente e ver o que deu de 405
                                     queue.put( takk );
                                 }
 
@@ -183,37 +181,60 @@ public class Main {
             } );
         }
 
-        Thread.ofPlatform( ).start( ( ) -> {
-
-            while ( true ) {
-
+        Thread.ofPlatform().name("batch-processor").start(() -> {
+            while (true) {
                 try {
-                    TimeUnit.SECONDS.sleep( 1 );
-                } catch ( InterruptedException e ) {
-                    logger.atError( ).log( "Interrupted" );
+
+                    TimeUnit.MILLISECONDS.sleep(10);
+                } catch (InterruptedException e) {
+                    logger.atError().log("Batch processor interrupted");
                 }
 
-                if ( INSERTS.toString( ).equals( INSERT_INTO_DEFAULT_VALUES ) ) {
-                    continue;
+                String batchSql;
+                synchronized (INSERTS_LOCK) {
+
+                    if (INSERTS.toString().equals(INSERT_INTO_DEFAULT_VALUES)) {
+                        continue;
+                    }
+                    
+
+                    batchSql = INSERTS.substring(0, INSERTS.length() - 2);
+
+                    INSERTS.delete(0, INSERTS.length());
+                    INSERTS.append(INSERT_INTO_DEFAULT_VALUES);
                 }
+                
+                logger.atInfo().log("Processing batch of payment insertions");
+                
+                try (Connection conn = Main.getDataSource().getConnection();
+                     Statement statement = conn.createStatement()) {
 
-                try ( Connection conn = Main.getDataSource( ).getConnection( );
-                      Statement statement = conn.createStatement( ) ) {
+                    statement.addBatch(batchSql);
+                    statement.executeBatch();
 
-                    statement.addBatch( INSERTS.substring( 0, INSERTS.length( ) - 2 ) );
-                    statement.executeBatch( );
+                    
+                    logger.atInfo().log("Batch processing completed successfully");
+                } catch (SQLException e) {
+                    logger.atError().log("Batch processing failed: {}", e.getMessage());
+                    logger.atInfo().log("Failed SQL: {}", batchSql);
 
-                    INSERTS.delete( 0, INSERTS.length( ) );
-                    INSERTS.append( INSERT_INTO_DEFAULT_VALUES );
-                    logger.atInfo( ).log( "OK" );
-                } catch ( SQLException e ) {
-                    logger.atInfo( ).log( INSERTS.substring( 0, INSERTS.length( ) - 2 ) );
-                    logger.atError( ).log( "SQL - {}", e.getMessage( ) );
+                    synchronized (INSERTS_LOCK) {
+
+                        if (INSERTS.toString().equals(INSERT_INTO_DEFAULT_VALUES)) {
+                            INSERTS = new StringBuffer(INSERT_INTO_DEFAULT_VALUES + batchSql + ", ");
+                        } else {
+                            INSERTS.append( batchSql ).append( ", " );
+                        }
+                    }
+
+                    try {
+                        TimeUnit.SECONDS.sleep(2);
+                    } catch (InterruptedException ie) {
+                        logger.atError().log("Interrupted during error backoff");
+                    }
                 }
             }
-        } );
-
-        //TODO INCOSISTENCIAAAAAAAAAAAAA
+        });
 
         HttpHandler defaultHandler = exchange -> {
             exchange.getResponseHeaders( ).put( Headers.CONTENT_TYPE, "text/plain" );
@@ -290,7 +311,6 @@ public class Main {
                                     """.formatted( resultSet.getDouble( "totals" ),
                                     resultSet.getInt( "requests" ) ) );
                         } else {
-                            //não tem fallback
                             stringBuilder.append( """
                                     "fallback": {
                                             "totalAmount": 0,
@@ -320,7 +340,6 @@ public class Main {
         final Undertow server = Undertow.builder( )
 //                .setIoThreads( 2 )
 //                .setWorkerThreads( 10 )
-
                 .addHttpListener( 8080, "0.0.0.0" )
                 .setHandler( pathHandler )
                 .build( );
@@ -335,9 +354,11 @@ public class Main {
         logger.atInfo( ).log( "Server started on http://localhost:8080" );
     }
 
-    private static void insert( Payment takk, int processedAtDefault ) {
+    private static void insert(Payment takk, int processedAtDefault) {
 
-        INSERTS.append( String.format( "('%s', %s, '%s', %s), ", takk.getCorrelationId( ), takk.getAmount( ), takk.getRequestedAt( ).toString( ), processedAtDefault ) );
-
+        synchronized (INSERTS_LOCK) {
+            INSERTS.append(String.format("('%s', %s, '%s', %s), ", 
+                takk.getCorrelationId(), takk.getAmount(), takk.getRequestedAt().toString(), processedAtDefault));
+        }
     }
 }
