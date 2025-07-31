@@ -149,7 +149,7 @@ public class Main {
                                 } else if ( httpResponse.statusCode( ) == 422 ) {
                                     logger.atError( ).log( "default 422 - {} - {}", writeValueAsString, httpResponse.body( ) );
                                 } else {
-                                    logger.atError( ).log( "default Não deu exception, mas retornou {} - {} - {}", httpResponse.statusCode( ), httpResponse.body( ), writeValueAsString );
+//                                    logger.atError( ).log( "default Não deu exception, mas retornou {} - {} - {}", httpResponse.statusCode( ), httpResponse.body( ), writeValueAsString );
                                     queue.put( takk );
                                 }
 
@@ -171,7 +171,7 @@ public class Main {
                                     } else if ( httpResponse.statusCode( ) == 422 ) {
                                         logger.atError( ).log( "fallback 422 - {}", writeValueAsString );
                                     } else {
-                                        logger.atError( ).log( "falback Não deu exception, mas retornou {} - {}", httpResponse.statusCode( ), httpResponse.body( ) );
+//                                        logger.atError( ).log( "falback Não deu exception, mas retornou {} - {}", httpResponse.statusCode( ), httpResponse.body( ) );
                                         queue.put( takk );
                                     }
 
@@ -365,6 +365,48 @@ public class Main {
             server.stop( );
             logger.atInfo( ).log( "Server stopped" );
         } ) );
+
+        try(HttpClient httpClient = HttpClient.newHttpClient( )) {
+            //Request de teste para saber se o problema é bater no default
+            final HttpRequest request = HttpRequest.newBuilder( )
+                    .uri( URI.create( urlDefault ) )
+                    .header( "Content-Type", "application/json" )
+                    .POST( HttpRequest.BodyPublishers.ofString( """
+                            {"correlationId":"a7fc622f-366e-4991-8220-db6d8b6d7c4b","amount":19.9,"requestedAt":"2025-07-29T02:50:52.175774Z"}
+                            """ ) )
+                    .build( );
+
+            HttpResponse< String > httpResponse = httpClient.send( request, HttpResponse.BodyHandlers.ofString( ) );
+
+            if (httpResponse.statusCode( ) == 200 ) {
+                logger.atInfo( ).log( "Tudo certo com o default" );
+            }else {
+                logger.atInfo( ).log( "Default com erro - {}", urlDefault );
+            }
+        } catch ( IOException | InterruptedException e ) {
+            logger.atError( ).log( "Default com exception - {}", e.getMessage( ) );
+        }
+
+        try(HttpClient httpClient = HttpClient.newHttpClient( )) {
+            //Request de teste para saber se o problema é bater no default
+            final HttpRequest request = HttpRequest.newBuilder( )
+                    .uri( URI.create( urlFallback ) )
+                    .header( "Content-Type", "application/json" )
+                    .POST( HttpRequest.BodyPublishers.ofString( """
+                            {"correlationId":"01b5994f-f99b-41a3-8ccd-ede12b459ef0","amount":19.9,"requestedAt":"2025-07-31T02:50:52.175762Z"}
+                            """ ) )
+                    .build( );
+
+            HttpResponse< String > httpResponse = httpClient.send( request, HttpResponse.BodyHandlers.ofString( ) );
+
+            if (httpResponse.statusCode( ) == 200 ) {
+                logger.atInfo( ).log( "Tudo certo com o fallback" );
+            }else {
+                logger.atInfo( ).log( "Fallback com erro - {}", urlDefault );
+            }
+        } catch ( IOException | InterruptedException e ) {
+            logger.atError( ).log( "Fallback com exception - {}", e.getMessage( ) );
+        }
 
         logger.atInfo( ).log( "Server started on http://localhost:8080" );
     }
