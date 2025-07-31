@@ -6,7 +6,7 @@
 
     <groupId>com.marcosisocram</groupId>
     <artifactId>daisy</artifactId>
-    <version>1.0.2</version>
+    <version>1.0.4</version>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>

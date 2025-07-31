@@ -31,6 +31,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -67,7 +68,7 @@ public class Main {
             config.setMaxLifetime( 1800000 );
 
             dataSource = new HikariDataSource( config );
-            logger.atInfo( ).log( "HikariDataSource created" );
+            logger.atInfo( ).log( "HikariDataSource created - {}", jdbc );
         }
         return dataSource;
     }
@@ -258,6 +259,7 @@ public class Main {
                         } catch ( JsonProcessingException e ) {
                             logger.atInfo( ).log( "JsonProcessingException: " + e.getMessage( ) );
                         } catch ( InterruptedException e ) {
+                            logger.atError( ).log( "Interrupted during error backoff" );
                             throw new RuntimeException( e );
                         }
 
@@ -276,6 +278,17 @@ public class Main {
                     logger.atInfo().log(  "from: {}, to: {}", from, to );
 
                     exchange.getResponseHeaders( ).put( Headers.CONTENT_TYPE, "application/json" );
+
+                    try (Connection conn = Main.getDataSource( ).getConnection( );
+                         Statement statement = conn.createStatement( );
+                         ResultSet resultSet = statement.executeQuery( """
+                                  select count(*) as total from payments;
+                                  """ )) {
+
+                        while (resultSet.next()) {
+                            logger.atInfo().log(  "total: {}", resultSet.getInt("total") );
+                        }
+                    }
 
                     try ( Connection conn = Main.getDataSource( ).getConnection( );
                           Statement statement = conn.createStatement( );
@@ -372,8 +385,8 @@ public class Main {
                     .uri( URI.create( urlDefault ) )
                     .header( "Content-Type", "application/json" )
                     .POST( HttpRequest.BodyPublishers.ofString( """
-                            {"correlationId":"a7fc622f-366e-4991-8220-db6d8b6d7c4b","amount":19.9,"requestedAt":"2025-07-29T02:50:52.175774Z"}
-                            """ ) )
+                            {"correlationId":"%s","amount":19.9,"requestedAt":"2025-07-31T02:50:52.175762Z"}
+                            """.formatted( UUID.randomUUID().toString() )  ) )
                     .build( );
 
             HttpResponse< String > httpResponse = httpClient.send( request, HttpResponse.BodyHandlers.ofString( ) );
@@ -393,8 +406,8 @@ public class Main {
                     .uri( URI.create( urlFallback ) )
                     .header( "Content-Type", "application/json" )
                     .POST( HttpRequest.BodyPublishers.ofString( """
-                            {"correlationId":"01b5994f-f99b-41a3-8ccd-ede12b459ef0","amount":19.9,"requestedAt":"2025-07-31T02:50:52.175762Z"}
-                            """ ) )
+                            {"correlationId":"%s","amount":19.9,"requestedAt":"2025-07-31T02:50:52.175762Z"}
+                            """.formatted( UUID.randomUUID().toString() ) ) )
                     .build( );
 
             HttpResponse< String > httpResponse = httpClient.send( request, HttpResponse.BodyHandlers.ofString( ) );
@@ -402,7 +415,7 @@ public class Main {
             if (httpResponse.statusCode( ) == 200 ) {
                 logger.atInfo( ).log( "Tudo certo com o fallback" );
             }else {
-                logger.atInfo( ).log( "Fallback com erro - {}", urlDefault );
+                logger.atInfo( ).log( "Fallback com erro - {}", urlFallback );
             }
         } catch ( IOException | InterruptedException e ) {
             logger.atError( ).log( "Fallback com exception - {}", e.getMessage( ) );
