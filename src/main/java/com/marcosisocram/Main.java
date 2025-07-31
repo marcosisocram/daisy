@@ -28,6 +28,8 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -44,6 +46,10 @@ public class Main {
 
     private static StringBuffer INSERTS = new StringBuffer( INSERT_INTO_DEFAULT_VALUES );
     private static final Object INSERTS_LOCK = new Object();
+
+    private static final ArrayDeque< String > DEFAULT_VALUE_FROM = new ArrayDeque<>( );
+    private static final ArrayDeque< String > DEFAULT_VALUE_TO = new ArrayDeque<>( );
+
 
 
     public static synchronized DataSource getDataSource( ) {
@@ -83,6 +89,9 @@ public class Main {
         objectMapper.registerModule( new JavaTimeModule( ) );
 
         final BlockingQueue< Payment > queue = new LinkedBlockingQueue<>( 20_000 );
+
+        DEFAULT_VALUE_FROM.push( Instant.now( ).minus( 1, ChronoUnit.DAYS ).toString( ) );
+        DEFAULT_VALUE_TO.push( Instant.now( ).plus( 1, ChronoUnit.DAYS ).toString( ) );
 
         logger.atInfo( ).log( "Server starting..." );
 
@@ -204,16 +213,12 @@ public class Main {
                     INSERTS.append(INSERT_INTO_DEFAULT_VALUES);
                 }
                 
-                logger.atInfo().log("Processing batch of payment insertions");
-                
                 try (Connection conn = Main.getDataSource().getConnection();
                      Statement statement = conn.createStatement()) {
 
                     statement.addBatch(batchSql);
                     statement.executeBatch();
 
-                    
-                    logger.atInfo().log("Batch processing completed successfully");
                 } catch (SQLException e) {
                     logger.atError().log("Batch processing failed: {}", e.getMessage());
                     logger.atInfo().log("Failed SQL: {}", batchSql);
@@ -260,8 +265,15 @@ public class Main {
                 } )
                 .addExactPath( "/payments-summary", exchange -> {
 
-                    final String from = Optional.ofNullable( exchange.getQueryParameters( ).get( "from" ).getFirst( ) ).orElse( Instant.now( ).minus( 1, ChronoUnit.DAYS ).toString( ) );
-                    final String to = Optional.ofNullable( exchange.getQueryParameters( ).get( "to" ).getFirst( ) ).orElse( Instant.now( ).plus( 1, ChronoUnit.DAYS ).toString( ) );
+
+
+                    Deque< String > fromDeque = exchange.getQueryParameters( ).getOrDefault( "from", DEFAULT_VALUE_FROM );
+                    Deque< String > toDeque = exchange.getQueryParameters( ).getOrDefault( "from", DEFAULT_VALUE_TO );
+
+                    final String from = fromDeque.getFirst( );
+                    final String to = toDeque.getFirst( );
+
+                    logger.atInfo().log(  "from: {}, to: {}", from, to );
 
                     exchange.getResponseHeaders( ).put( Headers.CONTENT_TYPE, "application/json" );
 
@@ -278,6 +290,7 @@ public class Main {
 
 
                         if ( ! resultSet.next( ) ) {
+                            logger.atInfo().log(  "Achou nada");
                             exchange.getResponseSender( ).send( """
                                           {
                                       "default": {
@@ -300,7 +313,7 @@ public class Main {
                                     },
                                 """.formatted( resultSet.getDouble( "totals" ),
                                 resultSet.getInt( "requests" ) ) );
-
+                        logger.atInfo().log(  "Default preenchido");
                         //fallback
                         if ( resultSet.next( ) ) {
                             stringBuilder.append( """
@@ -310,6 +323,7 @@ public class Main {
                                         }
                                     """.formatted( resultSet.getDouble( "totals" ),
                                     resultSet.getInt( "requests" ) ) );
+                            logger.atInfo().log(  "Fallback preenchido");
                         } else {
                             stringBuilder.append( """
                                     "fallback": {
@@ -317,6 +331,7 @@ public class Main {
                                             "totalRequests": 0.0
                                         }
                                     """ );
+                            logger.atInfo().log(  "Fallback vazio");
                         }
 
                         stringBuilder.append( "}" );
