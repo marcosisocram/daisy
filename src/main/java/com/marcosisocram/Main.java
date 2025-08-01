@@ -27,14 +27,18 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Optional;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Main {
 
@@ -51,7 +55,7 @@ public class Main {
     private static final ArrayDeque< String > DEFAULT_VALUE_FROM = new ArrayDeque<>( );
     private static final ArrayDeque< String > DEFAULT_VALUE_TO = new ArrayDeque<>( );
 
-
+    private static final AtomicInteger tt =  new AtomicInteger( 0 );
 
     public static synchronized DataSource getDataSource( ) {
         if ( dataSource == null ) {
@@ -76,6 +80,12 @@ public class Main {
     public static void main( String[] args ) {
 
         System.setProperty( "org.jboss.logging.provider", "slf4j" );
+
+        logger.atInfo().log( TimeZone.getDefault().getID() );
+        logger.atInfo().log( TimeZone.getDefault().getDisplayName() );
+        logger.atInfo().log( LocalDateTime.now().toString() );
+        logger.atInfo().log( Instant.now().toString() );
+
 
         final String urlDefault = Optional.ofNullable( System.getenv( "URL_DEFAULT" ) ).orElse( "http://localhost:8001/payments" );
         final String urlFallback = Optional.ofNullable( System.getenv( "URL_FALLBACK" ) ).orElse( "http://localhost:8002/payments" );
@@ -206,14 +216,13 @@ public class Main {
                     if (INSERTS.toString().equals(INSERT_INTO_DEFAULT_VALUES)) {
                         continue;
                     }
-                    
 
                     batchSql = INSERTS.substring(0, INSERTS.length() - 2);
 
                     INSERTS.delete(0, INSERTS.length());
                     INSERTS.append(INSERT_INTO_DEFAULT_VALUES);
                 }
-                
+
                 try (Connection conn = Main.getDataSource().getConnection();
                      Statement statement = conn.createStatement()) {
 
@@ -270,7 +279,7 @@ public class Main {
 
 
                     Deque< String > fromDeque = exchange.getQueryParameters( ).getOrDefault( "from", DEFAULT_VALUE_FROM );
-                    Deque< String > toDeque = exchange.getQueryParameters( ).getOrDefault( "from", DEFAULT_VALUE_TO );
+                    Deque< String > toDeque = exchange.getQueryParameters( ).getOrDefault( "to", DEFAULT_VALUE_TO );
 
                     final String from = fromDeque.getFirst( );
                     final String to = toDeque.getFirst( );
@@ -385,7 +394,7 @@ public class Main {
                     .uri( URI.create( urlDefault ) )
                     .header( "Content-Type", "application/json" )
                     .POST( HttpRequest.BodyPublishers.ofString( """
-                            {"correlationId":"%s","amount":19.9,"requestedAt":"2025-07-31T02:50:52.175762Z"}
+                            {"correlationId":"%s","amount":19.9,"requestedAt":"2025-06-31T02:50:52.175762Z"}
                             """.formatted( UUID.randomUUID().toString() )  ) )
                     .build( );
 
@@ -406,7 +415,7 @@ public class Main {
                     .uri( URI.create( urlFallback ) )
                     .header( "Content-Type", "application/json" )
                     .POST( HttpRequest.BodyPublishers.ofString( """
-                            {"correlationId":"%s","amount":19.9,"requestedAt":"2025-07-31T02:50:52.175762Z"}
+                            {"correlationId":"%s","amount":19.9,"requestedAt":"2025-06-31T02:50:52.175762Z"}
                             """.formatted( UUID.randomUUID().toString() ) ) )
                     .build( );
 
@@ -426,9 +435,15 @@ public class Main {
 
     private static void insert(Payment takk, int processedAtDefault) {
 
+        if (tt.get() % 2000 == 0) {
+            logger.atInfo( ).log(  "{} - {}", takk.getRequestedAt().toString( ), takk.getRequestedAt().atZone( ZoneId.systemDefault() ).toString( ) );
+        }
+
         synchronized (INSERTS_LOCK) {
-            INSERTS.append(String.format("('%s', %s, '%s', %s), ", 
+            INSERTS.append(String.format("('%s', %s, '%s', %s), ",
                 takk.getCorrelationId(), takk.getAmount(), takk.getRequestedAt().toString(), processedAtDefault));
+
+            tt.incrementAndGet( );
         }
     }
 }
