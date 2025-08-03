@@ -27,18 +27,13 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Optional;
-import java.util.TimeZone;
-import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class Main {
 
@@ -54,8 +49,6 @@ public class Main {
 
     private static final ArrayDeque< String > DEFAULT_VALUE_FROM = new ArrayDeque<>( );
     private static final ArrayDeque< String > DEFAULT_VALUE_TO = new ArrayDeque<>( );
-
-    private static final AtomicInteger tt =  new AtomicInteger( 0 );
 
     public static synchronized DataSource getDataSource( ) {
         if ( dataSource == null ) {
@@ -81,11 +74,6 @@ public class Main {
 
         System.setProperty( "org.jboss.logging.provider", "slf4j" );
 
-        logger.atInfo().log( TimeZone.getDefault().getID() );
-        logger.atInfo().log( TimeZone.getDefault().getDisplayName() );
-        logger.atInfo().log( LocalDateTime.now().toString() );
-        logger.atInfo().log( Instant.now().toString() );
-
 
         final String urlDefault = Optional.ofNullable( System.getenv( "URL_DEFAULT" ) ).orElse( "http://localhost:8001/payments" );
         final String urlFallback = Optional.ofNullable( System.getenv( "URL_FALLBACK" ) ).orElse( "http://localhost:8002/payments" );
@@ -105,8 +93,6 @@ public class Main {
         DEFAULT_VALUE_TO.push( Instant.now( ).plus( 1, ChronoUnit.DAYS ).toString( ) );
 
         logger.atInfo( ).log( "Server starting..." );
-
-        logger.atInfo( ).log( "CPUS - {}", Runtime.getRuntime( ).availableProcessors( ) );
 
         final String table = """
                 CREATE TABLE IF NOT EXISTS payments (
@@ -128,7 +114,6 @@ public class Main {
         } catch ( SQLException e ) {
             logger.atWarn( ).log( e.getMessage( ) );
         }
-
 
         int numberOfConsumers = Math.max( 10 * Runtime.getRuntime( ).availableProcessors( ), 10 );
 
@@ -157,15 +142,11 @@ public class Main {
 
                                 if ( httpResponse.statusCode( ) == 200 ) {
                                     insert( takk, PROCESSED_AT_DEFAULT );
-                                } else if ( httpResponse.statusCode( ) == 422 ) {
-                                    logger.atError( ).log( "default 422 - {} - {}", writeValueAsString, httpResponse.body( ) );
                                 } else {
-//                                    logger.atError( ).log( "default Não deu exception, mas retornou {} - {} - {}", httpResponse.statusCode( ), httpResponse.body( ), writeValueAsString );
                                     queue.put( takk );
                                 }
 
                             } catch ( IOException e ) {
-                                logger.atError( ).log( e.getMessage( ), e );
 
                                 try {
                                     final HttpRequest request = HttpRequest.newBuilder( )
@@ -179,21 +160,16 @@ public class Main {
 
                                     if ( httpResponse.statusCode( ) == 200 ) {
                                         insert( takk, PROCESSED_AT_FALLBACK );
-                                    } else if ( httpResponse.statusCode( ) == 422 ) {
-                                        logger.atError( ).log( "fallback 422 - {}", writeValueAsString );
                                     } else {
-//                                        logger.atError( ).log( "falback Não deu exception, mas retornou {} - {}", httpResponse.statusCode( ), httpResponse.body( ) );
                                         queue.put( takk );
                                     }
 
                                 } catch ( IOException exception ) {
-                                    logger.atError( ).log( "NOK {}", takk.getCorrelationId( ) );
                                     queue.put( takk );
                                 }
                             }
 
                         } catch ( InterruptedException | IOException e ) {
-                            logger.atError( ).log( "Parando o while - {}", e.getMessage( ) );
                             throw new RuntimeException( e );
                         }
                     }
@@ -202,52 +178,17 @@ public class Main {
         }
 
         Thread.ofPlatform().name("batch-processor").start(() -> {
+
+            final int sleepBatchProcessor = Integer.parseInt( Optional.ofNullable( System.getenv( "BATCH_SLEEP_MS" ) ).orElse( "10" ) );
+
             while (true) {
                 try {
-
-                    TimeUnit.MILLISECONDS.sleep(10);
+                    TimeUnit.MILLISECONDS.sleep(sleepBatchProcessor);
                 } catch (InterruptedException e) {
                     logger.atError().log("Batch processor interrupted");
                 }
 
-                String batchSql;
-                synchronized (INSERTS_LOCK) {
-
-                    if (INSERTS.toString().equals(INSERT_INTO_DEFAULT_VALUES)) {
-                        continue;
-                    }
-
-                    batchSql = INSERTS.substring(0, INSERTS.length() - 2);
-
-                    INSERTS.delete(0, INSERTS.length());
-                    INSERTS.append(INSERT_INTO_DEFAULT_VALUES);
-                }
-
-                try (Connection conn = Main.getDataSource().getConnection();
-                     Statement statement = conn.createStatement()) {
-
-                    statement.addBatch(batchSql);
-                    statement.executeBatch();
-
-                } catch (SQLException e) {
-                    logger.atError().log("Batch processing failed: {}", e.getMessage());
-                    logger.atInfo().log("Failed SQL: {}", batchSql);
-
-                    synchronized (INSERTS_LOCK) {
-
-                        if (INSERTS.toString().equals(INSERT_INTO_DEFAULT_VALUES)) {
-                            INSERTS = new StringBuffer(INSERT_INTO_DEFAULT_VALUES + batchSql + ", ");
-                        } else {
-                            INSERTS.append( batchSql ).append( ", " );
-                        }
-                    }
-
-                    try {
-                        TimeUnit.SECONDS.sleep(2);
-                    } catch (InterruptedException ie) {
-                        logger.atError().log("Interrupted during error backoff");
-                    }
-                }
+                processarBatch( );
             }
         });
 
@@ -276,28 +217,15 @@ public class Main {
                 } )
                 .addExactPath( "/payments-summary", exchange -> {
 
-
-
                     Deque< String > fromDeque = exchange.getQueryParameters( ).getOrDefault( "from", DEFAULT_VALUE_FROM );
                     Deque< String > toDeque = exchange.getQueryParameters( ).getOrDefault( "to", DEFAULT_VALUE_TO );
 
                     final String from = fromDeque.getFirst( );
                     final String to = toDeque.getFirst( );
 
-                    logger.atInfo().log(  "from: {}, to: {}", from, to );
+                    processarBatch();
 
                     exchange.getResponseHeaders( ).put( Headers.CONTENT_TYPE, "application/json" );
-
-                    try (Connection conn = Main.getDataSource( ).getConnection( );
-                         Statement statement = conn.createStatement( );
-                         ResultSet resultSet = statement.executeQuery( """
-                                  select count(*) as total from payments;
-                                  """ )) {
-
-                        while (resultSet.next()) {
-                            logger.atInfo().log(  "total: {}", resultSet.getInt("total") );
-                        }
-                    }
 
                     try ( Connection conn = Main.getDataSource( ).getConnection( );
                           Statement statement = conn.createStatement( );
@@ -312,7 +240,6 @@ public class Main {
 
 
                         if ( ! resultSet.next( ) ) {
-                            logger.atInfo().log(  "Achou nada");
                             exchange.getResponseSender( ).send( """
                                           {
                                       "default": {
@@ -335,7 +262,7 @@ public class Main {
                                     },
                                 """.formatted( resultSet.getDouble( "totals" ),
                                 resultSet.getInt( "requests" ) ) );
-                        logger.atInfo().log(  "Default preenchido");
+
                         //fallback
                         if ( resultSet.next( ) ) {
                             stringBuilder.append( """
@@ -345,7 +272,7 @@ public class Main {
                                         }
                                     """.formatted( resultSet.getDouble( "totals" ),
                                     resultSet.getInt( "requests" ) ) );
-                            logger.atInfo().log(  "Fallback preenchido");
+
                         } else {
                             stringBuilder.append( """
                                     "fallback": {
@@ -353,7 +280,6 @@ public class Main {
                                             "totalRequests": 0.0
                                         }
                                     """ );
-                            logger.atInfo().log(  "Fallback vazio");
                         }
 
                         stringBuilder.append( "}" );
@@ -388,62 +314,55 @@ public class Main {
             logger.atInfo( ).log( "Server stopped" );
         } ) );
 
-        try(HttpClient httpClient = HttpClient.newHttpClient( )) {
-            //Request de teste para saber se o problema é bater no default
-            final HttpRequest request = HttpRequest.newBuilder( )
-                    .uri( URI.create( urlDefault ) )
-                    .header( "Content-Type", "application/json" )
-                    .POST( HttpRequest.BodyPublishers.ofString( """
-                            {"correlationId":"%s","amount":19.9,"requestedAt":"2025-06-31T02:50:52.175762Z"}
-                            """.formatted( UUID.randomUUID().toString() )  ) )
-                    .build( );
-
-            HttpResponse< String > httpResponse = httpClient.send( request, HttpResponse.BodyHandlers.ofString( ) );
-
-            if (httpResponse.statusCode( ) == 200 ) {
-                logger.atInfo( ).log( "Tudo certo com o default" );
-            }else {
-                logger.atInfo( ).log( "Default com erro - {}", urlDefault );
-            }
-        } catch ( IOException | InterruptedException e ) {
-            logger.atError( ).log( "Default com exception - {}", e.getMessage( ) );
-        }
-
-        try(HttpClient httpClient = HttpClient.newHttpClient( )) {
-            //Request de teste para saber se o problema é bater no default
-            final HttpRequest request = HttpRequest.newBuilder( )
-                    .uri( URI.create( urlFallback ) )
-                    .header( "Content-Type", "application/json" )
-                    .POST( HttpRequest.BodyPublishers.ofString( """
-                            {"correlationId":"%s","amount":19.9,"requestedAt":"2025-06-31T02:50:52.175762Z"}
-                            """.formatted( UUID.randomUUID().toString() ) ) )
-                    .build( );
-
-            HttpResponse< String > httpResponse = httpClient.send( request, HttpResponse.BodyHandlers.ofString( ) );
-
-            if (httpResponse.statusCode( ) == 200 ) {
-                logger.atInfo( ).log( "Tudo certo com o fallback" );
-            }else {
-                logger.atInfo( ).log( "Fallback com erro - {}", urlFallback );
-            }
-        } catch ( IOException | InterruptedException e ) {
-            logger.atError( ).log( "Fallback com exception - {}", e.getMessage( ) );
-        }
-
         logger.atInfo( ).log( "Server started on http://localhost:8080" );
+    }
+
+    private static void processarBatch( ) {
+        String batchSql;
+        synchronized (INSERTS_LOCK) {
+
+            if (INSERTS.toString().equals(INSERT_INTO_DEFAULT_VALUES)) {
+                return;
+            }
+
+            batchSql = INSERTS.substring(0, INSERTS.length() - 2);
+
+            INSERTS.delete(0, INSERTS.length());
+            INSERTS.append(INSERT_INTO_DEFAULT_VALUES);
+        }
+
+        try (Connection conn = Main.getDataSource().getConnection();
+             Statement statement = conn.createStatement()) {
+
+            statement.addBatch(batchSql);
+            statement.executeBatch();
+
+        } catch (SQLException e) {
+            logger.atError().log("Batch processing failed: {}", e.getMessage());
+            logger.atInfo().log("Failed SQL: {}", batchSql);
+
+            synchronized (INSERTS_LOCK) {
+
+                if (INSERTS.toString().equals(INSERT_INTO_DEFAULT_VALUES)) {
+                    INSERTS = new StringBuffer(INSERT_INTO_DEFAULT_VALUES + batchSql + ", ");
+                } else {
+                    INSERTS.append( batchSql ).append( ", " );
+                }
+            }
+
+            try {
+                TimeUnit.SECONDS.sleep(2);
+            } catch (InterruptedException ie) {
+                logger.atError().log("Interrupted during error backoff");
+            }
+        }
     }
 
     private static void insert(Payment takk, int processedAtDefault) {
 
-        if (tt.get() % 2000 == 0) {
-            logger.atInfo( ).log(  "{} - {}", takk.getRequestedAt().toString( ), takk.getRequestedAt().atZone( ZoneId.systemDefault() ).toString( ) );
-        }
-
         synchronized (INSERTS_LOCK) {
             INSERTS.append(String.format("('%s', %s, '%s', %s), ",
                 takk.getCorrelationId(), takk.getAmount(), takk.getRequestedAt().toString(), processedAtDefault));
-
-            tt.incrementAndGet( );
         }
     }
 }
