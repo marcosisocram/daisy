@@ -78,6 +78,60 @@
                 </plugins>
             </build>
         </profile>
+        <profile>
+            <!-- pra ser execultado fora do docker, na maquina e gerar o arquivo default.iprof -->
+            <id>instrumented</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <version>0.10.6</version>
+                        <configuration>
+                            <skip>false</skip>
+                            <imageName>app</imageName>
+                            <buildArgs>
+                                <buildArg>--gc=serial</buildArg>
+                                <buildArg>-march=skylake</buildArg>
+                                <buildArg>--native-compiler-options=-march=skylake</buildArg>
+                                <buildArg>--native-compiler-options=-mtune=skylake</buildArg>
+                                <buildArg>--pgo-instrument</buildArg>
+                                <buildArg>--enable-url-protocols=http</buildArg>
+                                <buildArg>-Dorg.sqlite.lib.exportPath=${project.build.directory}</buildArg>
+                                <mainClass>com.marcosisocram.Main</mainClass>
+                            </buildArgs>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <!-- pra ser execultado dentro do docker e usar o arquivo default.iprof -->
+            <id>docker-optimized</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <version>0.10.6</version>
+                        <configuration>
+                            <skip>false</skip>
+                            <imageName>app</imageName>
+                            <buildArgs>
+                                <buildArg>--gc=serial</buildArg>
+                                <buildArg>-O3</buildArg>
+                                <buildArg>-march=skylake</buildArg>
+                                <buildArg>--native-compiler-options=-march=skylake</buildArg>
+                                <buildArg>--native-compiler-options=-mtune=skylake</buildArg>
+                                <buildArg>--enable-url-protocols=http</buildArg>
+                                <buildArg>-Dorg.sqlite.lib.exportPath=${project.build.directory}</buildArg>
+                                <mainClass>com.marcosisocram.Main</mainClass>
+                            </buildArgs>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
     </profiles>
 
     <build>
