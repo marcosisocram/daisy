@@ -45,10 +45,11 @@ public class Main {
     private static final String INSERT_INTO_DEFAULT_VALUES = "INSERT INTO payments (correlation_id, amount, requested_at, processed_at_default) VALUES ";
 
     private static StringBuffer INSERTS = new StringBuffer( INSERT_INTO_DEFAULT_VALUES );
-    private static final Object INSERTS_LOCK = new Object();
+    private static final Object INSERTS_LOCK = new Object( );
 
     private static final ArrayDeque< String > DEFAULT_VALUE_FROM = new ArrayDeque<>( );
     private static final ArrayDeque< String > DEFAULT_VALUE_TO = new ArrayDeque<>( );
+
 
     public static synchronized DataSource getDataSource( ) {
         if ( dataSource == null ) {
@@ -115,7 +116,7 @@ public class Main {
             logger.atWarn( ).log( e.getMessage( ) );
         }
 
-        int numberOfConsumers = Math.max( 10 * Runtime.getRuntime( ).availableProcessors( ), 10 );
+        final int numberOfConsumers = Integer.parseInt( Optional.ofNullable( System.getenv( "CONSUMER_QTD" ) ).orElse( "3" ) );
 
         for ( int i = 0; i < numberOfConsumers; i++ ) {
 
@@ -126,7 +127,9 @@ public class Main {
                 try ( HttpClient httpClient = HttpClient.newHttpClient( ) ) {
 
                     while ( true ) {
+
                         try {
+
                             final Payment takk = queue.take( );
 
                             final String writeValueAsString = objectMapper.writeValueAsString( takk );
@@ -177,20 +180,20 @@ public class Main {
             } );
         }
 
-        Thread.ofPlatform().name("batch-processor").start(() -> {
+        Thread.ofVirtual( ).name( "batch-processor").start( ( ) -> {
 
-            final int sleepBatchProcessor = Integer.parseInt( Optional.ofNullable( System.getenv( "BATCH_SLEEP_MS" ) ).orElse( "10" ) );
+            final int sleepBatchProcessor = Integer.parseInt( Optional.ofNullable( System.getenv( "BATCH_SLEEP_MS" ) ).orElse( "20" ) );
 
-            while (true) {
+            while ( true ) {
                 try {
-                    TimeUnit.MILLISECONDS.sleep(sleepBatchProcessor);
-                } catch (InterruptedException e) {
-                    logger.atError().log("Batch processor interrupted");
+                    TimeUnit.MILLISECONDS.sleep( sleepBatchProcessor );
+                } catch ( InterruptedException e ) {
+                    logger.atError( ).log( "Batch processor interrupted" );
                 }
 
                 processarBatch( );
             }
-        });
+        } );
 
         HttpHandler defaultHandler = exchange -> {
             exchange.getResponseHeaders( ).put( Headers.CONTENT_TYPE, "text/plain" );
@@ -223,7 +226,7 @@ public class Main {
                     final String from = fromDeque.getFirst( );
                     final String to = toDeque.getFirst( );
 
-                    processarBatch();
+                    processarBatch( );
 
                     exchange.getResponseHeaders( ).put( Headers.CONTENT_TYPE, "application/json" );
 
@@ -319,50 +322,50 @@ public class Main {
 
     private static void processarBatch( ) {
         String batchSql;
-        synchronized (INSERTS_LOCK) {
+        synchronized ( INSERTS_LOCK ) {
 
-            if (INSERTS.toString().equals(INSERT_INTO_DEFAULT_VALUES)) {
+            if ( INSERTS.toString( ).equals( INSERT_INTO_DEFAULT_VALUES ) ) {
                 return;
             }
 
-            batchSql = INSERTS.substring(0, INSERTS.length() - 2);
+            batchSql = INSERTS.substring( 0, INSERTS.length( ) - 2 );
 
-            INSERTS.delete(0, INSERTS.length());
-            INSERTS.append(INSERT_INTO_DEFAULT_VALUES);
+            INSERTS.delete( 0, INSERTS.length( ) );
+            INSERTS.append( INSERT_INTO_DEFAULT_VALUES );
         }
 
-        try (Connection conn = Main.getDataSource().getConnection();
-             Statement statement = conn.createStatement()) {
+        try ( Connection conn = Main.getDataSource( ).getConnection( );
+              Statement statement = conn.createStatement( ) ) {
 
-            statement.addBatch(batchSql);
-            statement.executeBatch();
+            statement.addBatch( batchSql );
+            statement.executeBatch( );
 
-        } catch (SQLException e) {
-            logger.atError().log("Batch processing failed: {}", e.getMessage());
-            logger.atInfo().log("Failed SQL: {}", batchSql);
+        } catch ( SQLException e ) {
+            logger.atError( ).log( "Batch processing failed: {}", e.getMessage( ) );
+            logger.atInfo( ).log( "Failed SQL: {}", batchSql );
 
-            synchronized (INSERTS_LOCK) {
+            synchronized ( INSERTS_LOCK ) {
 
-                if (INSERTS.toString().equals(INSERT_INTO_DEFAULT_VALUES)) {
-                    INSERTS = new StringBuffer(INSERT_INTO_DEFAULT_VALUES + batchSql + ", ");
+                if ( INSERTS.toString( ).equals( INSERT_INTO_DEFAULT_VALUES ) ) {
+                    INSERTS = new StringBuffer( INSERT_INTO_DEFAULT_VALUES + batchSql + ", " );
                 } else {
                     INSERTS.append( batchSql ).append( ", " );
                 }
             }
 
             try {
-                TimeUnit.SECONDS.sleep(2);
-            } catch (InterruptedException ie) {
-                logger.atError().log("Interrupted during error backoff");
+                TimeUnit.SECONDS.sleep( 2 );
+            } catch ( InterruptedException ie ) {
+                logger.atError( ).log( "Interrupted during error backoff" );
             }
         }
     }
 
-    private static void insert(Payment takk, int processedAtDefault) {
+    private static void insert( Payment takk, int processedAtDefault ) {
 
-        synchronized (INSERTS_LOCK) {
-            INSERTS.append(String.format("('%s', %s, '%s', %s), ",
-                takk.getCorrelationId(), takk.getAmount(), takk.getRequestedAt().toString(), processedAtDefault));
+        synchronized ( INSERTS_LOCK ) {
+            INSERTS.append( String.format( "('%s', %s, '%s', %s), ",
+                    takk.getCorrelationId( ), takk.getAmount( ), takk.getRequestedAt( ).toString( ), processedAtDefault ) );
         }
     }
 }

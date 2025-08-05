@@ -6,7 +6,7 @@
 
     <groupId>com.marcosisocram</groupId>
     <artifactId>daisy</artifactId>
-    <version>1.0.7</version>
+    <version>1.0.8</version>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -91,10 +91,10 @@
                             <skip>false</skip>
                             <imageName>app</imageName>
                             <buildArgs>
-                                <buildArg>--gc=serial</buildArg>
-                                <buildArg>-march=skylake</buildArg>
-                                <buildArg>--native-compiler-options=-march=skylake</buildArg>
-                                <buildArg>--native-compiler-options=-mtune=skylake</buildArg>
+<!--                                <buildArg>&#45;&#45;gc=serial</buildArg>-->
+<!--                                <buildArg>-march=skylake</buildArg>-->
+<!--                                <buildArg>&#45;&#45;native-compiler-options=-march=skylake</buildArg>-->
+<!--                                <buildArg>&#45;&#45;native-compiler-options=-mtune=skylake</buildArg>-->
                                 <buildArg>--pgo-instrument</buildArg>
                                 <buildArg>--enable-url-protocols=http</buildArg>
                                 <buildArg>-Dorg.sqlite.lib.exportPath=${project.build.directory}</buildArg>
@@ -118,11 +118,12 @@
                             <skip>false</skip>
                             <imageName>app</imageName>
                             <buildArgs>
-                                <buildArg>--gc=serial</buildArg>
+                                <buildArg>--no-fallback</buildArg>
+                                <buildArg>--gc=G1</buildArg>
                                 <buildArg>-O3</buildArg>
-                                <buildArg>-march=skylake</buildArg>
-                                <buildArg>--native-compiler-options=-march=skylake</buildArg>
-                                <buildArg>--native-compiler-options=-mtune=skylake</buildArg>
+                                <buildArg>-march=haswell</buildArg>
+                                <buildArg>--native-compiler-options=-march=haswell</buildArg>
+                                <buildArg>--native-compiler-options=-mtune=haswell</buildArg>
                                 <buildArg>--enable-url-protocols=http</buildArg>
                                 <buildArg>-Dorg.sqlite.lib.exportPath=${project.build.directory}</buildArg>
                                 <mainClass>com.marcosisocram.Main</mainClass>
